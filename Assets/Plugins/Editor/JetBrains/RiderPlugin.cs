@@ -7,6 +7,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using UnityEditor;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
@@ -41,7 +42,7 @@ namespace Plugins.Editor.JetBrains
 
     static RiderPlugin()
     {
-      if (Enabled)
+      if (Enabled && !Initialized)
       {
         InitRiderPlugin();
       }
@@ -82,7 +83,28 @@ namespace Plugins.Editor.JetBrains
       SlnFile = Path.Combine(projectDirectory, string.Format("{0}.sln", projectName));
       UpdateUnitySettings(SlnFile);
 
+      var thread = new Thread(ListenForUDPPackages);
+      thread.Start();
+
       Initialized = true;
+    }
+
+    private static void ListenForUDPPackages()
+    {
+      var udpServer = new UdpClient(11235);
+
+      while (true)
+      {
+        var groupEP = new IPEndPoint(IPAddress.Parse("127.0.0.1"), 11235);
+        var data = udpServer.Receive(ref groupEP);
+        var result = Encoding.UTF8.GetString(data);
+        if (result == "Play")
+        {
+          EditorApplication.ExecuteMenuItem("Edit/Play");
+          udpServer.Send(new byte[] {1}, 1);
+        }
+        udpServer.Send(new byte[] {0}, 1); // if data is received reply letting the client know that we got his data
+      }
     }
 
     /// <summary>
@@ -284,6 +306,8 @@ namespace Plugins.Editor.JetBrains
     {
       Debug.Log("[Rider] " + message);
     }
+
+
 
     /// <summary>
     /// JetBrains Rider Integration Preferences Item

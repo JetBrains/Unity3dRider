@@ -10,7 +10,6 @@ using System.Text;
 using System.Threading;
 using UnityEditor;
 using UnityEngine;
-using UnityToolbag;
 using Debug = UnityEngine.Debug;
 
 namespace Plugins.Editor.JetBrains
@@ -103,8 +102,11 @@ namespace Plugins.Editor.JetBrains
         {
           var data = udpServer.Receive(ref groupEP);
           var result = Encoding.UTF8.GetString(data);
-          Dispatcher.InvokeAsync(() =>
+          Log(result);
+          Dispatcher.Dispatch(() =>
           {
+//            if(!EditorApplication.isPlaying )
+
             EditorApplication.ExecuteMenuItem(result);
             udpServer.Send(new byte[] {1}, 1);
           });

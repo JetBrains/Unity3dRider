@@ -1,113 +1,131 @@
-﻿using UnityEngine;
+﻿/*
+ * Editor Thread Dispatcher
+ * Copyright © 2013 Popbox Studio
+ * http://www.popboxstudio.com
+ */
+
 using System;
 using System.Collections.Generic;
-using System.Threading;
 
-namespace UnityToolbag
+/// <summary>
+/// Editor Thread Dispatcher
+/// 
+/// Provides a means to execute a function on a Unity owned thread
+/// </summary>
+/// <see cref="DispatcherExample"/>
+[UnityEditor.InitializeOnLoad]
+public sealed class Dispatcher
 {
-  /// <summary>
-  /// A system for dispatching code to execute on the main thread.
-  /// </summary>
-  [AddComponentMenu("UnityToolbag/Dispatcher")]
-  [ExecuteInEditMode]
-  public class Dispatcher : MonoBehaviour
-  {
-    private static Dispatcher _instance;
+	private struct Task
+	{
+		public Delegate Function;
+		public object[] Arguments;
 
-    // We can't use the behaviour reference from other threads, so we use a separate bool
-    // to track the instance so we can use that on the other threads.
-    private static bool _instanceExists;
+		public Task (Delegate function, object[] arguments)
+		{
+			Function = function;
+			Arguments = arguments;
+		}
+	}
 
-    private static Thread _mainThread;
-    private static object _lockObject = new object();
-    private static readonly Queue<Action> _actions = new Queue<Action>();
+	/// <summary>
+	/// The queue of tasks that are being requested for the next time DispatchTasks is called
+	/// </summary>
+	private static Queue<Task> mTaskQueue = new Queue<Task> ();
+	
+	/// <summary>
+	/// Indicates whether there are tasks available for dispatching
+	/// </summary>
+	/// <value>
+	/// <c>true</c> if there are tasks available for dispatching; otherwise, <c>false</c>.
+	/// </value>
+	private static bool AreTasksAvailable {
+		get { return mTaskQueue.Count > 0; }
+	}
 
-    /// <summary>
-    /// Gets a value indicating whether or not the current thread is the game's main thread.
-    /// </summary>
-    public static bool isMainThread
-    {
-      get
-      {
-        return Thread.CurrentThread == _mainThread;
-      }
-    }
-
-    /// <summary>
-    /// Queues an action to be invoked on the main game thread.
-    /// </summary>
-    /// <param name="action">The action to be queued.</param>
-    public static void InvokeAsync(Action action)
-    {
-      if (!_instanceExists) {
-        Debug.LogError("No Dispatcher exists in the scene. Actions will not be invoked!");
-        return;
-      }
-
-      if (isMainThread) {
-        // Don't bother queuing work on the main thread; just execute it.
-        action();
-      }
-      else {
-        lock (_lockObject) {
-          _actions.Enqueue(action);
-        }
-      }
-    }
-
-    /// <summary>
-    /// Queues an action to be invoked on the main game thread and blocks the
-    /// current thread until the action has been executed.
-    /// </summary>
-    /// <param name="action">The action to be queued.</param>
-    public static void Invoke(Action action)
-    {
-      if (!_instanceExists) {
-        Debug.LogError("No Dispatcher exists in the scene. Actions will not be invoked!");
-        return;
-      }
-
-      bool hasRun = false;
-
-      InvokeAsync(() =>
-      {
-        action();
-        hasRun = true;
-      });
-
-      // Lock until the action has run
-      while (!hasRun) {
-        Thread.Sleep(5);
-      }
-    }
-
-    void Awake()
-    {
-      if (_instance) {
-        DestroyImmediate(this);
-      }
-      else {
-        _instance = this;
-        _instanceExists = true;
-        _mainThread = Thread.CurrentThread;
-      }
-    }
-
-    void OnDestroy()
-    {
-      if (_instance == this) {
-        _instance = null;
-        _instanceExists = false;
-      }
-    }
-
-    void Update()
-    {
-      lock (_lockObject) {
-        while (_actions.Count > 0) {
-          _actions.Dequeue()();
-        }
-      }
-    }
-  }
+	/// <summary>
+	/// Initializes all the required callbacks for this class to work properly
+	/// </summary>
+	static Dispatcher ()
+	{
+#if UNITY_EDITOR
+		UnityEditor.EditorApplication.update += DispatchTasks;
+#endif
+	}
+	
+	/// <summary>
+	/// Dispatches the specified action delegate.
+	/// </summary>
+	/// <param name='function'>
+	/// The function delegate being requested
+	/// </param>
+	public static void Dispatch (Action function)
+	{
+		Dispatch (function, null);
+	}
+	
+	/// <summary>
+	/// Dispatches the specified function delegate with the desired delegates
+	/// </summary>
+	/// <param name='function'>
+	/// The function delegate being requested
+	/// </param>
+	/// <param name='arguments'>
+	/// The arguments to be passed to the function delegate
+	/// </param>
+	/// <exception cref='System.NotSupportedException'>
+	/// Is thrown when this method is called from the Unity Player
+	/// </exception>
+	public static void Dispatch (Delegate function, params object[] arguments)
+	{
+#if UNITY_EDITOR
+		lock (mTaskQueue) {
+			mTaskQueue.Enqueue (new Task (function, arguments));
+		}
+#else
+		throw new System.NotSupportedException("Dispatch is not supported in the Unity Player!");
+#endif
+	}
+	
+	/// <summary>
+	/// Clears the queued tasks
+	/// </summary>
+	/// <exception cref='System.NotSupportedException'>
+	/// Is thrown when this method is called from the Unity Player
+	/// </exception>
+	public static void ClearTasks ()
+	{
+#if UNITY_EDITOR
+		if (AreTasksAvailable) {
+			lock (mTaskQueue) {
+				mTaskQueue.Clear ();
+			}
+		}
+#else
+		throw new System.NotSupportedException("ClearTasks is not supported in the Unity Player!");
+#endif
+	}
+	
+	/// <summary>
+	/// Dispatches the tasks that has been requested since the last call to this function
+	/// </summary>
+	/// <exception cref='System.NotSupportedException'>
+	/// Is thrown when this method is called from the Unity Player
+	/// </exception>
+	private static void DispatchTasks ()
+	{
+#if UNITY_EDITOR
+		if (AreTasksAvailable) {
+			lock (mTaskQueue) {
+				foreach (Task task in mTaskQueue) {
+					task.Function.DynamicInvoke (task.Arguments);
+				}
+					
+				mTaskQueue.Clear ();
+			}
+		}
+#else
+		throw new System.NotSupportedException("DispatchTasks is not supported in the Unity Player!");
+#endif
+	}
 }

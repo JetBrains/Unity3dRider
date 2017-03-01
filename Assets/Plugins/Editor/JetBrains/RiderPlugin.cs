@@ -7,7 +7,6 @@ using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Threading;
 using UnityEditor;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
@@ -50,6 +49,9 @@ namespace Plugins.Editor.JetBrains
 
     private static void InitRiderPlugin()
     {
+//      var udpCommandsHandlerGameObject = new GameObject ("UdpCommandsHandler"); // init
+//      udpCommandsHandlerGameObject.AddComponent<UdpCommandsHandler>();
+
       var riderFileInfo = new FileInfo(DefaultApp);
 
       var newPath = riderFileInfo.FullName;
@@ -83,28 +85,7 @@ namespace Plugins.Editor.JetBrains
       SlnFile = Path.Combine(projectDirectory, string.Format("{0}.sln", projectName));
       UpdateUnitySettings(SlnFile);
 
-      var thread = new Thread(ListenForUDPPackages);
-      thread.Start();
-
       Initialized = true;
-    }
-
-    private static void ListenForUDPPackages()
-    {
-      var udpServer = new UdpClient(11235);
-
-      while (true)
-      {
-        var groupEP = new IPEndPoint(IPAddress.Parse("127.0.0.1"), 11235);
-        var data = udpServer.Receive(ref groupEP);
-        var result = Encoding.UTF8.GetString(data);
-        if (result == "Play")
-        {
-          EditorApplication.ExecuteMenuItem("Edit/Play");
-          udpServer.Send(new byte[] {1}, 1);
-        }
-        udpServer.Send(new byte[] {0}, 1); // if data is received reply letting the client know that we got his data
-      }
     }
 
     /// <summary>
@@ -324,6 +305,23 @@ namespace Plugins.Editor.JetBrains
       if (GUILayout.Button(url))
       {
         Application.OpenURL(url);
+      }
+
+      if (GUILayout.Button("test socket Edit/Play"))
+      {
+        var client = new UdpClient();
+        IPEndPoint ep = new IPEndPoint(IPAddress.Parse("127.0.0.1"), 11235); // endpoint where server is listening
+        client.Connect(ep);
+
+// send data
+        var text = "Edit/Play";
+        var send_buffer = Encoding.ASCII.GetBytes(text);
+        client.Send(send_buffer, send_buffer.Length);
+
+        // then receive data
+
+        var receivedData = client.Receive(ref ep);
+        Log("receivedData: "+receivedData);
       }
 
       EditorGUI.BeginChangeCheck();

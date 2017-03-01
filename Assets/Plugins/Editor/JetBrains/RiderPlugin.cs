@@ -7,8 +7,10 @@ using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using UnityEditor;
 using UnityEngine;
+using UnityToolbag;
 using Debug = UnityEngine.Debug;
 
 namespace Plugins.Editor.JetBrains
@@ -49,9 +51,6 @@ namespace Plugins.Editor.JetBrains
 
     private static void InitRiderPlugin()
     {
-//      var udpCommandsHandlerGameObject = new GameObject ("UdpCommandsHandler"); // init
-//      udpCommandsHandlerGameObject.AddComponent<UdpCommandsHandler>();
-
       var riderFileInfo = new FileInfo(DefaultApp);
 
       var newPath = riderFileInfo.FullName;
@@ -85,7 +84,37 @@ namespace Plugins.Editor.JetBrains
       SlnFile = Path.Combine(projectDirectory, string.Format("{0}.sln", projectName));
       UpdateUnitySettings(SlnFile);
 
+      var thread = new Thread(ListenForUDPPackages);
+      thread.Start();
+
       Initialized = true;
+    }
+
+    private static void ListenForUDPPackages()
+    {
+      Log("ListenForUDPPackages");
+      var udpServer = new UdpClient(11235);
+      udpServer.Client.ReceiveTimeout = 10000;
+
+      while (true)
+      {
+        var groupEP = new IPEndPoint(IPAddress.Parse("127.0.0.1"), 11235);
+        try
+        {
+          var data = udpServer.Receive(ref groupEP);
+          var result = Encoding.UTF8.GetString(data);
+          Dispatcher.InvokeAsync(() =>
+          {
+            EditorApplication.ExecuteMenuItem(result);
+            udpServer.Send(new byte[] {1}, 1);
+          });
+          //udpServer.Send(new byte[] {0}, 1); // if data is received reply letting the client know that we got his data
+        }
+        catch (Exception)
+        {
+
+        }
+      }
     }
 
     /// <summary>
@@ -147,28 +176,28 @@ namespace Plugins.Editor.JetBrains
     private static bool CallUDPRider(int line, string slnPath, string filePath)
     {
       Log(string.Format("CallUDPRider({0} {1} {2})", line, slnPath, filePath));
-      using (var sock = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp))
+      using (var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp))
       {
         try
         {
-          sock.ReceiveTimeout = 10000;
+          socket.ReceiveTimeout = 10000;
 
           var serverAddr = IPAddress.Parse("127.0.0.1");
           var endPoint = new IPEndPoint(serverAddr, 11234);
 
           var text = line + "\r\n" + slnPath + "\r\n" + filePath + "\r\n";
           var send_buffer = Encoding.ASCII.GetBytes(text);
-          sock.SendTo(send_buffer, endPoint);
+          socket.SendTo(send_buffer, endPoint);
 
           var rcv_buffer = new byte[1024];
 
           // Poll the socket for reception with a 10 ms timeout.
-          if (!sock.Poll(10000, SelectMode.SelectRead))
+          if (!socket.Poll(10000, SelectMode.SelectRead))
           {
             throw new TimeoutException();
           }
 
-          int bytesRec = sock.Receive(rcv_buffer); // This call will not block
+          int bytesRec = socket.Receive(rcv_buffer); // This call will not block
           string status = Encoding.ASCII.GetString(rcv_buffer, 0, bytesRec);
           if (status == "ok")
           {
@@ -288,14 +317,9 @@ namespace Plugins.Editor.JetBrains
       Debug.Log("[Rider] " + message);
     }
 
-
-
     /// <summary>
     /// JetBrains Rider Integration Preferences Item
     /// </summary>
-    /// <remarks>
-    /// Contains all 3 toggles: Enable/Disable; Debug On/Off; Writing Launch File On/Off
-    /// </remarks>
     [PreferenceItem("Rider")]
     static void RiderPreferencesItem()
     {
@@ -309,19 +333,32 @@ namespace Plugins.Editor.JetBrains
 
       if (GUILayout.Button("test socket Edit/Play"))
       {
-        var client = new UdpClient();
-        IPEndPoint ep = new IPEndPoint(IPAddress.Parse("127.0.0.1"), 11235); // endpoint where server is listening
-        client.Connect(ep);
-
-// send data
         var text = "Edit/Play";
-        var send_buffer = Encoding.ASCII.GetBytes(text);
-        client.Send(send_buffer, send_buffer.Length);
+        using (var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp))
+        {
+          try
+          {
+            socket.ReceiveTimeout = 10000;
 
-        // then receive data
+            var serverAddr = IPAddress.Parse("127.0.0.1");
+            var endPoint = new IPEndPoint(serverAddr, 11235);
 
-        var receivedData = client.Receive(ref ep);
-        Log("receivedData: "+receivedData);
+            var send_buffer = Encoding.ASCII.GetBytes(text);
+            socket.SendTo(send_buffer, endPoint);
+
+            // Poll the socket for reception with a 10 ms timeout.
+            if (!socket.Poll(10000, SelectMode.SelectRead))
+            {
+              throw new TimeoutException();
+            }
+          }
+          catch (Exception)
+          {
+            //error Timed out
+            Log("Socket error or no response. "+ text);
+            throw;
+          }
+        }
       }
 
       EditorGUI.BeginChangeCheck();

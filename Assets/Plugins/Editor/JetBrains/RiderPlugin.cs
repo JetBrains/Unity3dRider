@@ -17,9 +17,9 @@ namespace Plugins.Editor.JetBrains
   [InitializeOnLoad]
   public static class RiderPlugin
   {
-    private static bool Initialized;
+    private static bool _initialized;
 
-    private static string SlnFile;
+    private static string _slnFile;
 
     private static string DefaultApp
     {
@@ -39,7 +39,7 @@ namespace Plugins.Editor.JetBrains
 
     static RiderPlugin()
     {
-      if (Enabled && !Initialized)
+      if (Enabled && !_initialized)
       {
         InitRiderPlugin();
       }
@@ -77,16 +77,16 @@ namespace Plugins.Editor.JetBrains
 
       var projectDirectory = Directory.GetParent(Application.dataPath).FullName;
       var projectName = Path.GetFileName(projectDirectory);
-      SlnFile = Path.Combine(projectDirectory, string.Format("{0}.sln", projectName));
-      UpdateUnitySettings(SlnFile);
+      _slnFile = Path.Combine(projectDirectory, string.Format("{0}.sln", projectName));
+      UpdateUnitySettings(_slnFile);
 
-      var thread = new Thread(ListenForUDPPackages);
+      var thread = new Thread(ListenForUdpPackages);
       thread.Start();
 
-      Initialized = true;
+      _initialized = true;
     }
 
-    private static void ListenForUDPPackages()
+    private static void ListenForUdpPackages()
     {
       Log("ListenForUDPPackages");
       var udpServer = new UdpClient(11235);
@@ -94,16 +94,14 @@ namespace Plugins.Editor.JetBrains
 
       while (true)
       {
-        var groupEP = new IPEndPoint(IPAddress.Parse("127.0.0.1"), 11235);
+        var endPoint = new IPEndPoint(IPAddress.Parse("127.0.0.1"), 11235);
         try
         {
-          var data = udpServer.Receive(ref groupEP);
+          var data = udpServer.Receive(ref endPoint);
           var result = Encoding.UTF8.GetString(data);
           Log(result);
           Dispatcher.Dispatch(() =>
           {
-            //            if(!EditorApplication.isPlaying )
-
             EditorApplication.ExecuteMenuItem(result);
             udpServer.Send(new byte[] {1}, 1);
           });
@@ -139,11 +137,11 @@ namespace Plugins.Editor.JetBrains
     /// Called when Unity is about to open an asset.
     /// </remarks>
     [UnityEditor.Callbacks.OnOpenAssetAttribute()]
-    static bool OnOpenedAsset(int instanceID, int line)
+    static bool OnOpenedAsset(int instanceId, int line)
     {
       if (Enabled)
       {
-        if (!Initialized)
+        if (!_initialized)
         {
           // make sure the plugin was initialized first.
           // this can happen in case "Rider" was set as the default scripting app only after this plugin was imported.
@@ -154,16 +152,16 @@ namespace Plugins.Editor.JetBrains
         string appPath = Path.GetDirectoryName(Application.dataPath);
 
         // determine asset that has been double clicked in the project view
-        var selected = EditorUtility.InstanceIDToObject(instanceID);
+        var selected = EditorUtility.InstanceIDToObject(instanceId);
 
         if (selected.GetType().ToString() == "UnityEditor.MonoScript" ||
             selected.GetType().ToString() == "UnityEngine.Shader")
         {
           SyncSolution(); // added to handle opening file, which was just recently created.
           var assetFilePath = Path.Combine(appPath, AssetDatabase.GetAssetPath(selected));
-          if (!CallUDPRider(line, SlnFile, assetFilePath))
+          if (!CallUDPRider(line, _slnFile, assetFilePath))
           {
-            var args = string.Format("{0}{1}{0} -l {2} {0}{3}{0}", "\"", SlnFile, line, assetFilePath);
+            var args = string.Format("{0}{1}{0} -l {2} {0}{3}{0}", "\"", _slnFile, line, assetFilePath);
             CallRider(DefaultApp, args);
           }
           return true;
@@ -185,10 +183,10 @@ namespace Plugins.Editor.JetBrains
           var endPoint = new IPEndPoint(serverAddr, 11234);
 
           var text = line + "\r\n" + slnPath + "\r\n" + filePath + "\r\n";
-          var send_buffer = Encoding.ASCII.GetBytes(text);
-          socket.SendTo(send_buffer, endPoint);
+          var sendBuffer = Encoding.ASCII.GetBytes(text);
+          socket.SendTo(sendBuffer, endPoint);
 
-          var rcv_buffer = new byte[1024];
+          var receiveBuffer = new byte[1024];
 
           // Poll the socket for reception with a 10 ms timeout.
           if (!socket.Poll(10000, SelectMode.SelectRead))
@@ -196,8 +194,8 @@ namespace Plugins.Editor.JetBrains
             throw new TimeoutException();
           }
 
-          int bytesRec = socket.Receive(rcv_buffer); // This call will not block
-          string status = Encoding.ASCII.GetString(rcv_buffer, 0, bytesRec);
+          int bytesRec = socket.Receive(receiveBuffer); // This call will not block
+          string status = Encoding.ASCII.GetString(receiveBuffer, 0, bytesRec);
           if (status == "ok")
           {
             ActivateWindow(new FileInfo(DefaultApp).FullName);
@@ -216,8 +214,8 @@ namespace Plugins.Editor.JetBrains
     private static void CallRider(string riderPath, string args)
     {
       var riderFileInfo = new FileInfo(riderPath);
-      var macOSVersion = riderFileInfo.Extension == ".app";
-      var riderExists = macOSVersion ? new DirectoryInfo(riderPath).Exists : riderFileInfo.Exists;
+      var macOsVersion = riderFileInfo.Extension == ".app";
+      var riderExists = macOsVersion ? new DirectoryInfo(riderPath).Exists : riderFileInfo.Exists;
 
       if (!riderExists)
       {
@@ -226,7 +224,7 @@ namespace Plugins.Editor.JetBrains
       }
 
       var proc = new Process();
-      if (macOSVersion)
+      if (macOsVersion)
       {
         proc.StartInfo.FileName = "open";
         proc.StartInfo.Arguments = string.Format("-n {0}{1}{0} --args {2}", "\"", "/" + riderPath, args);
@@ -295,7 +293,7 @@ namespace Plugins.Editor.JetBrains
       SyncSolution();
 
       // Load Project
-      CallRider(DefaultApp, string.Format("{0}{1}{0}", "\"", SlnFile));
+      CallRider(DefaultApp, string.Format("{0}{1}{0}", "\"", _slnFile));
     }
 
     [MenuItem("Assets/Open C# Project in Rider", true, 1000)]
@@ -309,10 +307,10 @@ namespace Plugins.Editor.JetBrains
     /// </summary>
     private static void SyncSolution()
     {
-      System.Type T = System.Type.GetType("UnityEditor.SyncVS,UnityEditor");
-      System.Reflection.MethodInfo SyncSolution = T.GetMethod("SyncSolution",
+      Type T = Type.GetType("UnityEditor.SyncVS,UnityEditor");
+      System.Reflection.MethodInfo syncSolution = T.GetMethod("SyncSolution",
         System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-      SyncSolution.Invoke(null, null);
+      syncSolution.Invoke(null, null);
     }
 
     public static void Log(object message)
@@ -346,8 +344,8 @@ namespace Plugins.Editor.JetBrains
             var serverAddr = IPAddress.Parse("127.0.0.1");
             var endPoint = new IPEndPoint(serverAddr, 11235);
 
-            var send_buffer = Encoding.ASCII.GetBytes(text);
-            socket.SendTo(send_buffer, endPoint);
+            var sendBuffer = Encoding.ASCII.GetBytes(text);
+            socket.SendTo(sendBuffer, endPoint);
 
             // Poll the socket for reception with a 10 ms timeout.
             if (!socket.Poll(10000, SelectMode.SelectRead))
@@ -381,7 +379,7 @@ All thouse problems will go away after Unity upgrades to mono4.";
       EditorGUI.EndChangeCheck();
     }
 
-    static class User32Dll
+    private static class User32Dll
     {
 
       /// <summary>
@@ -429,13 +427,13 @@ All thouse problems will go away after Unity upgrades to mono4.";
     /// Editor Thread Dispatcher
     /// Provides a means to execute a function on a Unity owned thread
     /// </summary>
-    [UnityEditor.InitializeOnLoad]
-    sealed class Dispatcher
+    [InitializeOnLoad]
+    private class Dispatcher
     {
       private struct Task
       {
-        public Delegate Function;
-        public object[] Arguments;
+        public readonly Delegate Function;
+        public readonly object[] Arguments;
 
         public Task(Delegate function, object[] arguments)
         {
@@ -466,7 +464,7 @@ All thouse problems will go away after Unity upgrades to mono4.";
       static Dispatcher()
       {
 #if UNITY_EDITOR
-        UnityEditor.EditorApplication.update += DispatchTasks;
+        EditorApplication.update += DispatchTasks;
 #endif
       }
 

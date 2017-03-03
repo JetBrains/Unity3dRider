@@ -429,9 +429,8 @@ All thouse problems will go away after Unity upgrades to mono4.";
     /// Editor Thread Dispatcher
     /// Provides a means to execute a function on a Unity owned thread
     /// </summary>
-    /// <see cref="DispatcherExample"/>
     [UnityEditor.InitializeOnLoad]
-    public sealed class Dispatcher
+    sealed class Dispatcher
     {
       private struct Task
       {
